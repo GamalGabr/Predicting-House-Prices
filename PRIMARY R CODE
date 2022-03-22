@@ -1,0 +1,2235 @@
+---
+title: "AMES SIMPLIFIED"
+author: "Gamal Gabr"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    toc: yes
+    number_sections: true
+    
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+```{r} 
+#suppress warnings globally
+options(warn=-1)
+```
+```{r}
+options(scipen = 999)              #suppress the appearance of scientific notation throughout the analysis
+```
+```{r}
+rm(list=ls())
+```
+
+###  BACKGROUND 
+
+<br />
+
+In order to put my newly acquired data science skills to the test, I decided to the explore the well-known *Ames* Housing dataset. This particular dataset documents 2006-2010 actual house prices in the City of Ames, Iowa. The dataset details the price of houses and is accompanied by a broad range of variables. The type of variables contained in this dataset primarily pertain to the quality, dimensions and quantity of physical characteristics associated with the respective properties. Generally, these covariates are the sort of features that prospective buyers are likely to be interested in, features such as the age of the property, the quality of the exterior and how many bathrooms the property holds. I refer the curious reader to the following [article](http://jse.amstat.org/v19n3/decock/DataDocumentation.txt), where an in-depth rundown of the various features can be obtained.
+
+<br />
+
+### STRUCTURE AND AIMS OF ANALYSIS 
+
+<br />
+
+**EDA:EXPLORATORY DATA ANALYSIS**
+
+* Investigate missing data
+* Clean respective data
+* Feature selection
+* Ensure data is suitable for modelling
+   + numeric conversions 
+   + decluttering categories
+
+**MODELLING**
+
+* Survey range of algorithms
+* Tune parameters/hyperparameters of promising algorithms
+* Construct explainer in order to derive key insights
+   +  global explanations
+   +  local explanations
+* Convert optimised model to a functional application for the use of front-end users/Shiny application (this stage of the process is not included in this document).
+
+
+<br />
+
+
+### KEY INSIGHTS
+
+
+<br />
+
+Employing an alpha level of 0.05,  `Overall Quality` (0.86), `Overall area` (78.8), `External Quality` (69.4) and the number of `garage cars` (0.66) turned out to have the highest significant correlations with Sale Price. The `age of the house` (-0.56) and `time since remodelled` (-0.53) had the highest significant negative correlations with Sale Price. Pearson's correlation coefficient (r) was employed- this metric quantifies `linear association`. Of course, Pearson's correlation is unsuitable for adequately capturing curvilinear relationships between variables. The house prices ranged from $12,789 to $755,000, with the average price equating to $ 180,796 (standard deviation= $79,886.69).
+
+I employed a range of predictive algorithms in order to discover an algorithm that would yield optimally low residual error. Of the algorithms tested, _Extreme Gradient Boosting_ and _Random Forest_ algorithms demonstrated the best predictive performances. I was able to obtain a mean absolute error (MAE) of $15,045 using extreme gradient boosting on unseen data (segregated validation set) and a MAE of $15,981 by employing the random forest algorithm. In terms of the features with the most important `global/overall` importance, both the `random forest` model and the `extreme gradient boosting` model agreed that <font color="orange">Overall Area (of the interior house) and Overall Quality</font> were the top two primary drivers responsible for estimating Sale Price. Additionally, I ran a classic multiple linear regression: the most important features for prediction turned out to be Overall Quality in first place, with Overall Area being the fourth most important feature. Thus, given the consensus between these differing algorithms, our confidence increases that these variables are indeed important predictors for determining sale price. As sale price increased, all of the models tested struggled to consistently and accurately predict the respective house prices. One potential hypothesis - admittedly, a tentative one- that could account for the deficit in predictive capacity in these upper price regions, is that such prices are less likely to be shaped by ordinary consumer behaviour. Buyers operating in the higher price region are not constrained by the usual economic push/pull factors; in other words, the liberated movement of human whim is introducing volatility.  
+
+<br/>
+
+**AVENUES FOR FURTHER STUDY**
+
+* Consider experimentation with polynomial terms/log transformations/ splines to improve modelling. 
+
+* Consider reintroducing some of the discarded variables. 
+
+
+<br/>
+
+### COMMENCE OF THE ANALYSIS
+
+<br />
+
+I recruited the following libraries at various stages throughout the modelling process
+
+<br />
+
+```{r, message=FALSE, warning=FALSE}
+
+library(ggplot2)
+library(caret)
+library(tidyr)
+library(DMwR)
+library(missForest)
+library(randomForest)
+library(tidymodels)
+library(ranger) 
+library(recipes) 
+library(workflows) 
+library(themis)
+library(xgboost)
+library(ggdark)
+library(viridis)
+library(DALEXtra)
+library(ggthemes)
+library(lares)
+library(kableExtra)
+library(tidyr)
+library(tidyverse)
+library(reshape)
+library(dplyr)
+library(modelStudio)
+library(DALEXtra)
+library(DALEX)
+library(tidymodels)
+library(vip)
+```
+
+<br />
+
+I decided to define a couple of customised visualisation themes at the outset of the project; I wanted to be able to easily format the visual output of the analysis in a consistent manner. I feel that visual consistency enhances the fluidity of the reading process.  
+
+<br />
+
+```{r}
+ISAAC.THEME <- theme(plot.title = element_text(hjust = 0.5), #  title centralised
+        plot.background = element_rect(fill="black"), #background to be black
+        panel.background = element_rect(fill="gray20"), # panel background to be dark grey
+        panel.grid.minor = element_line(color="black"), # grid lines to be removed
+        panel.grid.major = element_line(color="black"), # grid lines to be removed
+        axis.text = element_text(color="white"), # axis text to appear white
+        title = element_text(color="white", face="bold"), # title to be white and bold.
+        legend.background = element_rect(fill="black"), # legend background appear as black
+        legend.text = element_text(color="white", size=20), # legend text to appear white
+        legend.key = element_rect(fill="black", color="black"), 
+        legend.position = "top")
+```
+
+```{r}
+ISAAC.THEME2 <- theme(plot.title = element_text(hjust = 0.5), # title centralised
+        plot.background = element_rect(fill="black"), #  background to be black
+        panel.background = element_rect(fill="gray20"), #  panel background to be grey
+        panel.grid.minor = element_line(color="black"), #  grid lines to be removed
+        panel.grid.major = element_line(color="black"), # grid lines to be removed
+        axis.text = element_text(color="white"), # axis text to be white
+        title = element_text(color="white", face="bold"), # title to appear white and bold.
+        legend.background = element_rect(fill="black"), # legend of background should appear black
+        legend.text = element_text(color=NULL, size=12 ), # legend text should appear white
+        legend.key = element_rect(fill=NULL), 
+        legend.position = 'none')
+ 
+```
+<br />
+I had previously saved the dataset in on my computer. I commenced the analysis by loading the respective dataset in its raw form. 
+
+<br />
+
+```{r, import.2} 
+load("ames.RData")
+```
+
+<br />
+
+In accordance with tradition, I kicked-off the analysis by inspecting the broad structure of the data provided. I wanted to  glance the contents of the dataset.
+
+<br />
+
+```{r}
+df_str(ames, return = "plot")
+```
+<br />
+
+**RAW DATA**
+
+<br />
+
+I wished to obtain more insight into  the contents of the data in its unprocessed form; I decided to inspect the first fifteen rows:  
+
+<br />
+
+
+```{r, echo=FALSE} 
+head(ames, 15) %>% kable() %>% kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive")) %>% scroll_box(width="100%",height="300px")
+```
+
+<br />
+
+
+
+
+**CLEARER OVERVIEW USING PSYCH**
+
+<br />
+
+
+I recruited the _psych_ package to obtain summary statistics regarding the variability of the data, including the kurtosis and skew of the respective data.
+
+<br />
+
+
+```{r}
+psych::describe(ames) %>% 
+    kable()  %>% kable_styling(bootstrap_options = "striped") %>%
+    scroll_box(width = "100%", height = "300px")
+```
+
+<br />
+
+
+### EXAMINING MISSING VALUES
+
+<br />
+
+I was keen to establish how complete the dataset was; I used the following stream of code to provide clear insight into this question 
+<br />
+
+
+
+```{r,  out.width="170%"}
+  ames%>%
+  gather(key = "key", value = "val") %>% 
+  mutate(is.missing = is.na(val)) %>% 
+  group_by(key, is.missing) %>%
+  summarise(Absent.data = n())%>%
+  filter(is.missing == TRUE, Absent.data > 1) %>% 
+  select(-is.missing) %>%
+  arrange(desc(Absent.data)) %>% 
+  ggplot(aes(x = reorder(key, Absent.data), y = Absent.data, fill = key)) +
+  geom_col() +
+  coord_flip() +
+  xlab("Variable") +
+  ylab("Absent values")+
+  theme(legend.position='none')+
+  geom_text( aes( label = Absent.data), colour ="white", hjust = 1.0, size = 4.0)+
+  coord_flip()+
+  ISAAC.THEME2
+```
+
+<br/>
+
+The primary [documentation](http://jse.amstat.org/v19n3/decock/DataDocumentation.txt) relating to the contents of the Ames Housing dataset is revealing: surprisingly, the designation 'NA' for `some` of the variables provided did not signal the standard `not available` meaning . For instance, in relation to Pool.QC, the designation _NA_ translates as *No Pool*, _NA_ means *No Basement* for Bsmt.Qual and *No Alley* in relation to Alley.
+
+Of course, I could not be entirely sure whether some of these *NA* entries indicate the absence of certain variables like pools and fireplaces were the result of systematic labelling or accidental omissions. However, in the case of the pool and fireplace variables, I could reduce the likelihood that the `NA` entries were caused by accidental omissions. Before I permitted myself to recode with distasteful haste, I engaged in a little verification. I simply reasoned that if a house truly does not have a pool, clearly the variable `Pool.Area` (denoting area of pool) should not exceed 0.
+
+
+**POOL**
+ 
+<br />
+```{r}
+ames%>%
+  select(Pool.Area, Pool.QC)%>% 
+  filter(Pool.Area > 0 & is.na(Pool.QC))
+```
+
+
+The 0 result started suggested that there were no issues there. 
+
+<br />
+
+**FIREPLACES**
+
+<br />
+
+Similarly, I reasoned that if a house truly does not have a fireplace, then naturally it should not have an accompanying rating.
+
+<br />
+
+```{r} 
+ames %>% 
+  select(Fireplaces, Fireplace.Qu) %>% filter(Fireplaces > 0 & is.na(Fireplace.Qu))
+```
+Again, I was satisfied that there were no issues here either. 
+
+I decided to relabel the `NA` variables appropriately. This deficit in the respective data entries can be classified as *MNAR*: missing not at random. I was now in a position to confidently perform some blanket coding.
+
+<br />
+
+```{r, chunk 6} 
+# create temporary subset for recoding 
+
+x<- ames[c('Alley','Bsmt.Exposure', 'BsmtFin.Type.1','BsmtFin.Type.2', 'Fireplace.Qu', 'Garage.Type', 'Garage.Finish', 'Garage.Qual', 'Garage.Cond','Pool.QC','Fence','Misc.Feature')] #list of variables to be recoded
+
+# recode specified variables 
+
+x=as.matrix(x)
+x[is.na(x)] <-"None"
+x=as.data.frame(x)
+
+
+myvars <- names(ames) %in% c("Alley", "Bsmt.Exposure", "BsmtFin.Type.1", "BsmtFin.Type.2", "Fireplace.Qu", "Garage.Type", "Garage.Finish", "Garage.Qual", "Garage.Cond","Pool.QC","Fence","Misc.Feature")
+
+ames.reduced <- ames[!myvars] #remove specified variables in their original format
+
+ames.Updated<- bind_cols(ames.reduced, x )
+# append updated variables to reduced dataset
+```
+
+<br/>
+
+In aforementioned code chunk, I extracted the variables where the designation `NA` indicates the absence of the respective feature(s) into a separate data frame, before recoding NA as *'None'*. Thereafter, I removed the original variables, before using dplyr's 'bind_cols' function to append the revised variables back to the original dataset. These manoeuvres significantly reduced my NA burden - the following code block and resultant graphical display illustrates the revised level of missingness.
+
+<br/>
+
+```{r}
+ames.Updated %>%
+  gather(key = "key", value = "val") %>% 
+  mutate(is.missing = is.na(val)) %>% 
+  group_by(key, is.missing) %>%
+  summarise(Absent.data = n())%>%
+  filter(is.missing == TRUE, Absent.data > 1) %>% 
+  select(-is.missing) %>%
+  arrange(desc(Absent.data)) %>% 
+  ggplot(aes(x = reorder(key, Absent.data), y = Absent.data, fill = key)) +
+  geom_col() +
+  coord_flip() +
+  xlab("Variable") +
+  ylab("Absent values")+
+  theme(legend.position='none')+
+  geom_text( aes( label = Absent.data), colour ="white", hjust = 1.0, size = 4.0)+
+  coord_flip()+
+  ISAAC.THEME2
+```
+
+<br />
+
+The coding provided great improvement! My NA burden was reduced considerably.
+
+<br />
+
+**DETECT EMPTY STRINGS**
+
+<br/>
+
+The *is.na* function does not detect the presence of missing strings, so I decided to do an independent check for their presence in the dataset and then tabulate the results
+```{r}
+EmptyStrings <- colSums(ames.Updated == "", na.rm =TRUE)
+rev(stack(EmptyStrings[EmptyStrings > 0]))%>%kable()%>% kable_styling(bootstrap_options = c("striped", "hover", "condensed", full_width = F))
+```
+
+<br/>
+
+I decided to recode all the empty strings as *NA*- if you happen to have Saint-like patience, I'll show you how I addressed these entries alongside the other *NAs* in the imputation phase!
+
+
+```{r}
+ames.Updated <- ames.Updated %>% mutate_all(na_if,"")
+```
+
+<br />
+
+I decided to remove the features *Order* and *Parcel identification*(PID) from the dataset as these are effectively arbitrary and unlikely to have been useful for any form of meaningful generalisation.
+
+```{r, 33238534422}
+#remove Order, PID variables
+ames.Updated<-ames.Updated%>%select(-c(Order,PID))
+```
+
+<br/>
+
+
+
+
+###  ADDRESS INCORRECTLY LABELLED VARIABLES 
+
+<br />
+
+A close inspection of the dataset revealed that the variable _MS.SubClass_ had been incorrectly labelled as an integer. I converted this variable to a factor variable. _MS SubClass_ is a nominal variable that characterises the type of dwelling, from a 1-story building to a duplex style of house . I converted this variable to a factor before recoding the various levels simply using the letters of the alphabet at this stage. 
+
+```{r, chunk 8}
+class(ames.Updated$MS.SubClass)
+ames.Updated$MS.SubClass<-as.factor(ames.Updated$MS.SubClass)
+levels(ames.Updated$MS.SubClass) <- c("A","B","C","D","E","F","G","H","I","J","K","L","M","N","O","P")
+```
+
+<br />
+
+**MONTH SOLD**
+
+<br/>
+
+
+Month sold (Mo.Sold) was entered as a an integer, however I reclassified it as a factor variable 
+
+<br/>
+
+```{r, chunk 9}
+ames.Updated[["Mo.Sold"]] <- factor(ames.Updated[["Mo.Sold"]])
+ames.Updated$Month.Sold <- month.abb[ames.Updated$Mo.Sold]
+ames.Updated$Mo.Sold<-NULL
+ames.Updated$Month.Sold<-as.factor(ames.Updated$Month.Sold)
+```
+
+<br/>
+
+
+
+
+### FEATURE ENGINEERING
+
+<br/>
+
+
+I decided to modify the variables `Year.Built`, `Garage.Yr.Blt` and `Year.Remod.Add` slightly: instead of defining these variables by their respective year, I wanted to extract the number of years elapsed. I accomplished this by simply subtracting the year from 2010 (the year in which the sale prices were recorded). I felt that this would make the data friendlier for usage with the various algorithms that were to be employed in due course.
+
+<br/>
+
+
+
+```{r, chunk 10}
+ames.Updated$Age.of.house <- 2010 - ames.Updated$Year.Built
+ames.Updated$Year.Built<-NULL
+ames.Updated$Age.of.garage <- 2010 - ames.Updated$Garage.Yr.Blt
+ames.Updated$Garage.Yr.Blt <-NULL
+ames.Updated$Yrs.since.Remod<-2010-ames.Updated$Year.Remod.Add
+ames.Updated$Year.Remod.Add<-NULL
+```
+
+<br />
+
+### REDUCTION OF EXTRANEOUS CLUTTER 
+
+<br/>
+
+
+
+
+The original dataset contained four variables quantifying the types of bathrooms; I decided to aggregate these variables into a united variable simply entitled 'Bathroom.Tally'.
+
+<br/>
+
+
+```{r} 
+ames.Updated$Bathroom.Tally <- 0.5 * ames.Updated$Half.Bath + 0.5 * ames.Updated$Bsmt.Half.Bath + ames.Updated$Bsmt.Full.Bath + ames.Updated$Full.Bath 
+```
+<br/>
+
+I decided to combine the interior area related variables, namely Total.Bsmt.SF (total square feet of basement area) and Gr.Liv.Area (above ground living area of the house in square feet) .
+
+```{r}
+ames.Updated$Overall.AREA <- ames.Updated$Gr.Liv.Area + ames.Updated$Total.Bsmt.SF
+```
+
+<br/>
+
+I then removed the constituent variables of Bathroom.tally, Overall.area.size and Porch area:
+
+<br/>
+
+
+```{r}
+ames.Updated<-ames.Updated%>%select(-c(Half.Bath, Bsmt.Half.Bath,Bsmt.Full.Bath,Full.Bath,Gr.Liv.Area,Total.Bsmt.SF))
+```
+
+<br/>
+
+
+
+
+
+
+
+
+
+
+
+
+
+**ELIMINATE NEAR ZERO VARIANCE FACTORS**
+
+
+<br />
+
+
+The *nearZeroVar* functions evaluates the ratio of the highest frequency value to the next most frequent value(freqCut) . In addition, the function evaluates the percentage of unique values in relation to the overall quantity of samples (uniqueCut). The default settings are freqCut = 19 and uniqueCut = 10. Prior to inspecting the data for near-zero variance predictors , I decided to use dplyr's *drop_na* function so that I was examining the dataset using only 'complete cases'. 
+
+<br/>
+
+```{r, ,warning=FALSE, message=FALSE}
+
+ames.Updated.comp<-ames.Updated%>%drop_na()
+
+nzv.data <- nearZeroVar(ames.Updated.comp, saveMetrics = TRUE)
+drop.cols <- rownames(nzv.data)[nzv.data$nzv == TRUE]
+ames.Updated.2<- ames.Updated[,!names(ames.Updated)%in% drop.cols]
+```
+
+<br/>
+
+Applying the near zero variance function flagged the following variables: Alley,Street, Land.Contour, Utilities, Land.Slope, Misc.Val, Pool.Area,Screen.Porch, Enclosed.Porch, Open.Porch.SF,Garage.Cond,Kitchen.Abv.Gr,Low.Qual.Fin.SF,Bsmt.Fin.SF.2, Condition.2, Bsmt.Cond, BsmtFin.Type.2,Roof.Matl for removal. All of the suggested variables were removed. 
+
+<br/>
+
+###  MULTICOLLINEARITY
+
+<br/>
+
+When independent variables are highly correlated, changes in one variable are associated with changes in the other correlated variables. When conducting multiple linear regression, it becomes challenging to change one feature without simultaneously changing another independent variable, thus the algorithm struggles to discern the unique relationship that exists between particular individual independent variables upon the dependent variable. Unfortunately, the coefficient estimates become unreliable, they are sensitive to small changes in the model. Whilst the presence of multicollinearity influences the coefficient and p-values, it will not impair predictive performance. 
+
+I extracted a subset consisting of all complete cases.
+```{r, message=FALSE}
+ames_complete <- 
+ames.Updated.2[complete.cases(ames.Updated.2), ]
+```
+
+<br />
+
+**NUMERIC AND CATEGORICAL COMPLETE CASES**
+
+<br />
+
+I then extracted a new subset containing all numeric variables:
+```{r, chunk 14}
+amesnumeric.comp <- dplyr::select_if(ames_complete, is.numeric)
+```
+<br />
+I then decided to find out what numeric variables were most correlated with Sale Price
+```{r}
+corr_var(amesnumeric.comp, # name of dataset
+         SalePrice, # name of variable to focus on
+         max_pvalue = 0.05
+        ,top = 10)
+```
+<br />
+
+
+### CORRELATIONS
+
+<br/>
+
+I removed the dependent variable *SalePrice* before examining the pairwise correlations:
+```{r, chunk 15}    
+amesnumeric2 <-amesnumeric.comp[c(-19)]
+```
+
+<br />
+
+**PAIRWISE CORRELATIONS ACROSS COVARIATES** 
+
+<br />
+
+The caret *findCorrelation* evaluates pair-wise correlations across all variables, flagging variables that are highly correlated.  Of the identified pairs, the function recommends the removal of the variable with the highest average absolute correlation across the dataset. However, I decided to retain the variables that have the highest correlation with the dependent variable i.e. SalePrice.I proceeded to find out which of the variables had the highest correlation with the dependent variable. Firstly, I extracted a subset with the suggested variables for removal, I was then able to easily arrange the correlations with `SalePrice` in descending order.
+<br/>
+
+
+
+
+```{r, chunk 16} 
+library(caret)
+identify<-caret::findCorrelation(cor(amesnumeric2),cutoff = 0.75,names = T, verbose = T)
+``` 
+
+<br/>
+
+
+
+ 
+
+```{r, chunk 17}
+ames.suggestions<- amesnumeric.comp[c('Garage.Cars','Garage.Area','Overall.AREA',  'X1st.Flr.SF','Age.of.garage', 'Age.of.house','SalePrice')]
+```
+
+
+```{r}
+#evaluate correlations against dependent variable
+ames.suggestions %>% corr_var(SalePrice)
+```
+
+<br />
+
+
+
+
+
+I removed the three variables that had the lowest correlation with SalePrice from the *amesnumeric.comp* subset.
+```{r}
+#variable to be removed
+minus.vars<-c("Age.of.garage","Age.of.house","X1st.Flr.SF")
+
+#create numeric subset devoid of variables specified in minus.vars
+amesnumeric.3 <- amesnumeric.comp[,!names(amesnumeric.comp) %in% minus.vars]
+```
+
+<br/>
+
+
+At this stage, I removed the same variables from the main dataset
+```{r}
+ames.Updated.3<-ames.Updated.2[,!names(ames.Updated.2)%in% minus.vars]
+```
+
+<br/>
+
+
+
+### HIGHEST SIGNIFICANT CORRELATIONS 
+
+<br/>
+
+I decided to evaluate which variables had the highest correlations (using Pearson's r) with SalePrice. I shall took a subset featuring only complete cases from the previously updated primary dataset:
+```{r}
+ames.comp2<-ames.Updated.3[complete.cases(ames.Updated.3),]
+```
+
+<br/>
+
+I took a further subset containing only the numeric variables from the subset containing only complete cases before evaluating the respective correlations.
+```{r}
+amesnumeric.4<-dplyr::select_if(ames.comp2, is.numeric)
+```
+```{r}
+corr_var(amesnumeric.4, # name of dataset
+         SalePrice, # name of variable to focus on
+         max_pvalue = 0.05
+        ,top = 10)
+```
+
+<br />
+
+
+### FACTOR SELECTION 
+
+<br />
+
+I wanted a fairly quick way to identify influential factor variables. Here, I decided to the enlist the aid of the Random forest algorithm to help identify influential categorical factors. I created a subset of the factor/character variables with Sale Price. Afterwards, I ran the random forest algorithm. 
+```{r}
+Factor_subset <- ames_complete[sapply(ames_complete, is.character)|sapply(ames_complete, is.factor)|names(ames_complete)=='SalePrice']
+```
+
+
+
+
+
+
+```{r}
+set.seed(174)
+Influential.Factors <- ranger(SalePrice ~ ., data = Factor_subset, importance = "permutation")
+```
+```{r}
+Extract.influential <- vip(Influential.Factors)
+plot(Extract.influential)
+```
+
+
+<br />
+
+
+
+
+
+
+
+
+
+
+
+##  ILLUMINATING VISUALSATIONS {.tabset .tabset-pills}
+
+<br />
+
+I decided to produce a range of potentially informative visualisations; I was particularly interested in seeing whether I could spot any discernible relationships between the dependent variable and the respective exploratory variables. The adage of 'a picture speaks a thousand words' is very often the case in the field of data analysis. Up until this point, throughout the EDA (Exploratory Data Analysis) section, I had relied heavily upon the guidance of the Pearson correlation coefficient. However, as I stated earlier, the Pearson coefficient is a measure of `linear` correlation, it does not capture non-linear relationships. Informative patterns may well exist between the independent variable(s) and the dependent variable that the Pearson coefficient fails to capture.
+
+<br />
+
+
+
+### **NUMERIC VARIABLES**
+
+<br />
+
+Here, I plotted all the numeric variables against Sale Price 
+
+
+
+```{r, fig.height=20, fig.width=20} 
+amesnumeric.4%>%
+    pivot_longer(-SalePrice, names_to = "Feature", values_to = "Value") %>%
+    ggplot() +
+    geom_point(mapping=aes(x = Value, y = SalePrice, color = Feature)) + 
+    scale_y_continuous(labels = scales::comma)+
+    facet_wrap(~ Feature, scales = "free", ncol = 4) +
+    scale_x_continuous(n.breaks = 2)+
+    theme(legend.position = "",
+          plot.title.position = "plot")+
+    labs(x = "Numeric Feature Value",
+         title = "Ames Housing Numeric Variable versus Sale Price")+
+  ISAAC.THEME
+```
+
+<br/>
+
+`Overall Area` is clearly moving in tandem with Sale Price, whereas `Years since remodeled` appears to exhibit a clearly discernible negative correlation with Sale Price.
+
+
+### **PRICE VARIATION OVER TIME**
+
+<br />
+
+
+```{r}
+ggplot(data = ames_complete, 
+       mapping = aes(x = Yrs.since.Remod, y = SalePrice)) +
+    geom_line() +
+    facet_wrap(vars(Neighborhood)) +
+    labs(title = "Price vs Time since remodeled/Neighbourhood")+
+  theme_economist()
+```
+
+<br/>
+
+Please note that the variable `time since remodeled` ( Yrs.since.Remod) translates as the time since construction if remodelling/additions have not been carried out. 
+
+
+<br />
+
+
+
+
+###  **FACTOR VARIABLES (Boxplots)**
+
+
+
+
+<br />
+
+```{r, fig.height=22, fig.width=20}
+Factor_subset%>%gather(-SalePrice, key = "var", value = "value") %>%ggplot(aes(x = value, y = SalePrice)) +
+    geom_violin() +
+    facet_wrap(~ var, scales = "free") +
+    theme_bw()+
+  ISAAC.THEME2
+```
+
+<br />
+
+
+
+
+
+### **DENSITY PLOTS**
+
+<br />
+
+I decided to expore the distribution densities of the exploratory variables.
+
+
+```{r, fig.height=20, fig.width=20}
+melt(ames_complete) %>%
+  ggplot(aes(x= value)) +
+    geom_density(fill='#fdae6b') + facet_wrap(~variable, scales = 'free')+
+ISAAC.THEME
+```
+
+<br />
+
+
+
+
+### **DISTRIBUTION OF SALE PRICE**
+
+<br />
+
+
+
+
+
+
+
+
+```{r, out.width="80%"}
+
+ggplot(ames.Updated.3, aes(x=SalePrice, y=..density..)) + 
+  geom_histogram(bins=50, fill="#8F0C90", col="#DAF7A6") +
+  geom_density(size = 1, colour = "#FFFAE5") +
+  labs(title = "Houses prices", x = 'Price', y = "Frequency") +
+  scale_x_continuous(labels=scales::dollar_format())+
+  theme(plot.title = element_text(hjust = 0.5))+
+  ISAAC.THEME
+```
+
+<br/>
+
+The distribution of house prices is clearly right-skewed. I felt that it may be worth considering logarithmic transformations of sale price (the dependent variable), especially for linear modelling.
+
+<br/>
+
+### **NEIGHBOURHOOD VS SALE PRICE**
+
+
+<br/>
+
+
+
+My hunch was that prices would vary considerably across neighbourhoods, indeed the visualization featured below clearly indicates that this was the case.
+```{r}
+library(ggridges)
+ggplot(ames.comp2, aes(x = `SalePrice`, y = Neighborhood, fill = stat(x))) +
+  geom_density_ridges_gradient(scale = 3, rel_min_height = 0.01) +
+  scale_fill_viridis_c(name = "Prices", option = "C") +
+  labs(title = 'Prices across Neighbourhoods')
+```
+
+
+
+<br/>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## {-}
+
+
+
+
+<br/>
+
+
+
+
+
+
+
+Drawing upon:
+https://jimgruman.netlify.app/post/tidymodels/-->
+
+
+
+
+
+
+
+<br/>
+
+
+## SUMMARY TABLES/DESCRIPTIVE STATS {.tabset .tabset-pills}
+
+<br/>
+
+I was keen to obtain an overview of some basic descriptive summary statistics, my primary motivation was to identify factor levels containing a low number of entries. Factor levels with a low level of entries be problematic for running many algorithms. 
+
+<br/>
+
+### _BASEMENT QUALITY_
+
+<br />
+```{r}
+ames.Updated.3%>%group_by(Bsmt.Qual)%>%summarize(n=n())%>%mutate(percent = round(n / sum(n) * 100, 2))%>%kable()%>%kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+``` 
+
+### _EXTERNAL QUALITY_
+
+<br />
+
+```{r}
+ames.Updated.3%>%group_by(Exter.Qual)%>%summarize(n=n())%>%mutate(prop=n/sum(n))%>%kable()%>%kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+### _KITCHEN QUALITY_
+
+<br/>
+
+```{r}
+ames.Updated.3%>%group_by(Kitchen.Qual)%>%summarize(n=n())%>%mutate(percent = round(n / sum(n) * 100, 2))%>%knitr::kable(
+    format = "html",
+    booktabs = TRUE, # For LaTeX
+    col.names = c("Quality", "Count", "Percentage"),
+    caption = "Kitchen Quality Proportions",
+    digits = 1
+  ) %>%kable_styling(bootstrap_options = "striped")
+```
+
+<br/>
+
+### _FIREPLACE QUALITY_
+
+
+<br/>
+
+```{r}
+ames.Updated.3%>%group_by(Fireplace.Qu)%>%summarize(n=n())%>%mutate(percent = round(n / sum(n) * 100, 2))%>%knitr::kable(
+    format = "html",
+    booktabs = TRUE, # For LaTeX
+    col.names = c("Quality", "Count", "Percentage"),
+    caption = "Distribution of Fireplace Quality",
+    digits = 1
+  ) %>%kable_styling(bootstrap_options = "striped")
+```
+
+
+<br/>           
+
+
+
+
+### _SALE PRICE SUMMARIES_
+
+<br/>
+
+
+```{r}
+library(kableExtra)
+ames.Updated.3%>%
+   summarise(average = mean(SalePrice), median=median(SalePrice), minimum = min(SalePrice), maximum=max(SalePrice), standard.deviation=sd(SalePrice)) %>% 
+    kable()%>%kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+```
+
+
+
+<!--
+
+ames.Updated.3 %>% 
+    group_by(Overall.Qual) %>% 
+    summarise(Avg_SalePrice = mean(SalePrice),
+              Median_SalePrice = median(SalePrice),
+              Min_SalePrice = min(SalePrice),
+              Max_SalePrice = max(SalePrice)) %>% 
+    arrange(-Median_SalePrice)%>%kable()%>%kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+ -->
+
+
+
+
+
+
+
+## {-}
+
+
+
+
+
+
+
+
+<br/>
+
+
+
+
+### ESSENTIAL RECODING 
+
+<br/>
+
+
+
+A number of the variables in this dataset were of the ordinal type; I decided to recode these as numeric variables, primarily to ensure that they would be suitable for the modelling process.
+<br/>
+
+**EXTERNAL QUALITY**
+
+<br/>
+
+```{r}
+
+ames.Updated.3$Exter.Qual <- as.numeric(factor(ames.Updated.3$Exter.Qual, 
+                                  levels = c("Fa","TA", "Gd", "Ex"),
+                                  labels = c(1,2,3,4) ,ordered = TRUE))
+```
+
+<br/>
+
+**BASEMENT QUALITY**
+
+<br/>
+
+```{r}
+ames.Updated.3$Bsmt.Qual <- as.numeric(factor(ames.Updated.3$Bsmt.Qual, 
+levels = c("Po","Fa", "TA", "Gd", "Ex"), labels = c(1,2,3,4,5) ,ordered = TRUE))
+```
+
+<br/>
+
+**KITCHEN QUALITY**
+
+<br/>
+
+When I was perusing through the distribution of levels, I realized that there is only one entry for a classification of `Poor`(Po), therefore I shall assimilate this into the nearest rank of `Fair`(Fa). : 
+
+```{r}
+ames.Updated.3[ames.Updated.3$Kitchen.Qual=="Po",]$Kitchen.Qual <- "Fa"
+```
+
+```{r}
+
+ames.Updated.3$Kitchen.Qual <- as.numeric(factor(ames.Updated.3$Kitchen.Qual, 
+                                  levels = c("Fa","TA", "Gd", "Ex"),
+                                  labels = c(1,2,3,4) ,ordered = TRUE))
+```
+
+<br/>
+
+**FIREPLACE QUALITY**
+
+<br/>
+
+```{r}
+ames.Updated.3$Fireplace.Qu <- as.numeric(factor(ames.Updated.3$Fireplace.Qu, 
+                                  levels = c("None","Po","Fa", "TA", "Gd", "Ex"),
+                                  labels = c(1,2,3,4,5,6) ,ordered = TRUE))
+```
+<br/>
+
+Now that I had introduced some new numeric variables into the dataset, I decided to examine their correlation with `sale price`.
+
+
+```{r}
+ames.ordinal<- ames.Updated.3[c('Exter.Qual','Fireplace.Qu','Bsmt.Qual',  'Kitchen.Qual','SalePrice')]
+ames.ordinal%>%drop_na()%>%corr_var(SalePrice, max_pvalue = 0.05)
+```
+
+<br/>
+
+
+### REDUCED DATASET
+
+<br/>
+
+At this stage, I decided to reduce the evolving dataset considerably by selecting the twenty exploratory variables that had thus far indicated clear predictive promise. I made the decision to include the top ten variables with the highest correlation with Sale Price, in addition to the top ten most important features extracted from the `random forest` algorithm that I ran earlier using the factor variables to predict house prices. The model was  entitled `Influential.Factors`. I extracted the relevant subset from `ames.Updated.3`. 
+
+
+
+```{r}
+ames.parsimonious6<-ames.Updated.3%>%select(Overall.Qual,Overall.AREA,Garage.Cars, Garage.Area, Bathroom.Tally, Mas.Vnr.Area, Yrs.since.Remod,TotRms.AbvGrd,Fireplaces,BsmtFin.SF.1,Bsmt.Qual,Foundation,Exter.Qual,Kitchen.Qual,Neighborhood,Fireplace.Qu, Garage.Type, Garage.Finish, MS.SubClass, Exterior.1st,SalePrice)
+```
+
+<br/>
+
+### ENSURE FACTOR VARIABLES ARE SUITABLE FOR MODELLING:
+
+<br/>
+
+<!--{r}
+ames.parsimonious6<-read.csv(file='ames.parsi6.csv')
+-->
+
+
+
+
+I soon realized that I still needed to do a little more preprocessing before the data was ready for the modelling process. A number of the independent variables had levels with few entries. I decided to recruit the `Forcats` library in order to relevel levels with fewer than 50 entries into a new category simply labelled 'other'. I initially attempted to run a number of the models without including this step, however a number of the models failed to function as intended.    
+
+
+```{r}
+library(forcats)
+
+ames.parsimonious6 <- ames.parsimonious6 %>%mutate(Neighborhood = fct_lump_min(Neighborhood, min=50, other_level = "other"))
+
+ames.parsimonious6 <- ames.parsimonious6 %>%mutate(MS.SubClass = fct_lump_min(MS.SubClass, min=50, other_level = "other"))
+
+ames.parsimonious6 <- ames.parsimonious6 %>%mutate(Exterior.1st = fct_lump_min(Exterior.1st, min=50, other_level = "other"))
+
+ames.parsimonious6 <- ames.parsimonious6 %>%mutate(Garage.Type = fct_lump_min(Garage.Type, min=50, other_level = "other"))
+```
+
+<br/>
+
+In the basement quality variable, only two of the entries were marked as `Poor(Po)`; I decided to change these entries to `Fair(Fa)`. This would increase the likelihood of algorithms running smoothly.
+```{r}
+#convert few entries marked '1' as '2'
+
+ames.parsimonious6$Bsmt.Qual[ames.parsimonious6$Bsmt.Qual==1]<-2
+
+```
+<!--
+write.csv(ames.parsimonious6,"ames.parsi6.csv",row.names=FALSE)
+```
+<br/>
+
+{r}
+ames.parsimonious4<-read.csv(file='ames.parsi4.csv')-->
+
+<br/>
+
+### RECRUITING TIDYMODELS
+
+<br/>
+
+It was time to begin the modelling process. Firstly, I needed to divide the primary dataset into a training and testing dataset.
+
+<!--Here, I draw [inspiration](https://www.andrewaage.com/post/using-tidymodels-to-predict-duration-of-bergen-bike-rides/)-->
+
+ 
+
+
+<br/>
+
+```{r}
+library(doParallel)
+# doParallel
+cores <- parallel::detectCores(logical = FALSE)
+cl <- makePSOCKcluster(cores)
+registerDoParallel(cores = cl)
+```
+
+```{r}
+#split data into training/testing sets
+set.seed(174)
+data_split <- initial_split(ames.parsimonious6, strata = "SalePrice", prop = 0.75)
+
+ames_train <- training(data_split)
+ames_test  <- testing(data_split)
+```
+
+<br/>
+
+
+I decided to recruit the `recipes-package` for some final preprocessing of the evolving dataset. A recipe allows one to craft a sequence of preprocessing operations on specified datasets. Thereafter, the recipe can be independently applied to other sets, including validation sets. One of the primary benefits of using the tidymodels/recipe framework is that it allows a data analyst to easily avoid the leakage of data between sets. A classic mistake can occur when certain preprocessing steps like `centering and scaling` are applied to the entire dataset before it is split into train/test or cross-validation folds. It is important to apply certain data preparation steps `after` splitting the data into respective train/test/folds in order to avoid biasing predictive performance. An example of this form of data leakage would occur if the analyst attempted to normalize columns of a dataset before splitting it into train/test subsets. If the analyst decided to apply min-max normalization, the process would entail calculating the global maximum(s)/minimum(s) in order to apply to every calculation. If this was done before splitting, the resultant training would have some insight into the distribution of the test data set. This type of issue can also arise with various forms of imputation. 
+
+
+In the following recipe I imputed missing data with K-nearest neighbours(KNN)-this algorithm, using Euclidean distance, recruits the `k` nearest samples in the sample space and imputes the mean of the specified neighbours. In addition, I converted all categorical variables to dummy variables in order to make them machine learning friendly.
+
+
+```{r,warning=FALSE, message=FALSE}
+model_rec <- recipe(
+  SalePrice ~ .,
+  data= ames_train)%>%step_dummy(all_nominal())%>%step_knnimpute(all_predictors(), neighbors = 10)%>%prep(training=ames_train, retain=TRUE, verbose=TRUE)
+```
+
+Here, I applied the recipe `model_rec` to the ames_train data
+```{r}
+trainSet.prep<-bake(model_rec,new_data=ames_train, composition='matrix')
+trainSet = as.data.frame((trainSet.prep))
+```
+
+Similarly, I used the function `bake` to apply the same recipe to the `ames_test` set.
+
+```{r,warning=FALSE, message=FALSE}
+testSet.prep<-bake(model_rec,new_data=ames_test, composition='matrix')
+testSet = as.data.frame((testSet.prep))
+```
+
+
+
+<!--```{r, eval=FALSE}
+trainSet.prep<-bake(model_rec,new_data=ames_train, composition='matrix')
+trainSet = as.data.frame((trainSet.prep))
+
+```
+
+```{r, eval=FALSE}
+trainSet = as.data.frame((USEFUL))
+
+
+recipes::step_string2factor(all_nominal())
+```-->
+
+<!--{r}
+set.seed(123)
+SVM <- train(SalePrice ~ ., data = trainSet,method = "svmRadial", trControl = trainControl(method = "cv", number = 10), verbose = FALSE)-->
+
+
+
+
+
+
+
+<!-- ```{r,warning=FALSE, message=FALSE, eval=FALSE}
+USEFUL.NEW<-bake(model_rec,new_data=ames_test, composition='matrix')
+``` -->
+
+<!--{r}
+testSet = as.data.frame((USEFUL.NEW))
+```-->
+
+
+### LINEAR MODELLING
+
+<br/>
+
+I decided to run a simple linear model to begin with. Linear regression is a good place to start testing models. Having visually examined the scatter plots of the independent variables against the dependent variable in the visualisation section, my hunch was that linear modelling would prove to be an inappropriate method. The scatterplots suggested that some of the continuous variables appeared to be violating one of the cardinal assumptions of linear regression- Linearity! This assumption posits that the dependent variable has a roughly linear relationship with each of the covariates. 
+
+Here, I constructed a simple linear model using all of the variables in the model.
+
+```{r, message=FALSE}  
+set.seed(741)
+Linear.model<-lm(SalePrice~., data=trainSet)
+```
+
+I wanted to test the linear model on the test set. 
+
+```{r}
+predictions <- predict(Linear.model, newdata = testSet)
+```
+
+<br/>
+
+I calculated the residuals using the formula residuals = actual - prediction.
+
+```{r}
+residuals <- testSet$SalePrice - predictions
+```
+
+<br/>
+
+I was keen to find out how well the model performed. Here, I simply wanted to see the root-mean-square error(RMSE). 
+
+<br/>
+
+```{r}
+sqrt(mean(Linear.model$residuals^2))
+```
+
+
+
+
+
+### ASSESSMENT OF RESIDUALS
+
+<br/>
+
+The adage "A picture is worth a thousand words" is an apt expression when it comes assessing the residuals of linear models.
+
+
+```{r}
+par(mfrow=c(2,2)) # Change the panel layout to 2 x 2
+plot(Linear.model)
+```  
+
+The linear model appeared to be poorly predicting prices in the upper price ranges: the residuals versus fitted plot indicates increased variance as the price ascends. The quantile-quantile(Q-Q) plot was particularly revealing: the residuals are overdispersed. The distribution is heavier tailed than a normal distribution: this generally signifies that there are more extreme values than would be expected if the underlying distribution was normal. The p-values and confidence intervals will be potentially biased and too narrow, which may result in an increase in type I errors (claiming that x affects y, when it does not). I decided to seek some corroboration via some trusted allies: the Shapiro, Breusch-Pagan and Anderson-Darling tests were all brought to the fore. 
+
+<br/>
+
+**SHAPIRO TEST**
+
+<br/>
+
+I commenced my investigation with the Shapiro test. I wanted to find out whether the residuals/errors were normally distributed. Whilst it is not a prerequisite that the residuals are normally distributed for ordinary least squares to generate unbiased estimates of the underlying population parameters, meeting this condition facilitates the production of trustworthy prediction and confidence intervals.
+```{r}
+p_val <- shapiro.test(Linear.model$residuals)$p.value;
+if(p_val>=0.05) {
+  print("The data is likely to be normally distributed")
+} else {
+  print("Given that p<0.05, the data does not appear to be normally distributed. The calculated
+coeffient estimates cannot be trusted")
+}
+```
+The null hypothesis of the shapiro test is that the observed data is normally distributed. As p<0.05, in keeping with custom, I concluded that the residuals were not normally distributed. 
+
+<br/>
+
+**BREUSCH-PAGAN TEST**
+
+<br/>
+
+I decided to perform a homoscedastic test. The Breusch-Pagan test evaluates the homoscedasticity of the residuals. Linear regression is particularly suitable when the error/residuals are homoscedastic across all the predicted values of the dependent variable. This type of assessment gauges whether a regression model's ability to predict the dependent variable is consistent across all ranges of the respective variable.
+
+<br/>
+```{r, message=FALSE, warning=FALSE}
+library(lmtest)
+bptest(Linear.model)
+
+if(p_val>=0.05) {
+  print("The data can be considered homoscesdastic")
+} else {
+  print("Given that p<0.05,  heteroskedasticity appears to be present.")
+}
+```
+<br/>
+
+**ANDERSON DARLING TEST**
+
+<br/>
+
+```{r}
+# Anderson-Darling normality test
+library(nortest)
+ad.test(Linear.model$residuals)
+
+if(p_val>=0.05) {
+  print("The data can be considered to be normally distributed")
+} else {
+  print("The result suggests that the residuals are NOT normally distibuted ")
+}
+
+```
+Non-normality and heteroscedasticity were clearly present in the distribution of the residuals. If heteroscedasticity is present and is the only principal assumption of linear regression that is not met, this does not bias the regression coefficients. However, it does bias the standard errors and test-statistics. Unfortunately, this can produce inaccurate standard errors that result in confidence intervals that cannot be relied on. 
+
+<br/>
+
+
+**OUTLIERS**
+
+<br/>
+
+I decided to look a little further into the presence of the outliers that were showing up in the diagnostic plots. Outliers can be found by inspecting the standardized residuals. Standardized residuals indicate the number of standard errors removed from the regression line. It is customary to consider standardized residuals exceeding 3 as possible outliers.
+
+Whilst not all outliers are deemed to be influential, they are generally worth exploring further.  Cook’s distance is a metric that seeks to capture the influence of a value: it is governed by a mixture of leverage and residual size.
+
+```{r, message=FALSE, warning=FALSE}
+plot(Linear.model, 4, id.n = 6)
+plot(Linear.model, 5, id.n = 6)
+```
+
+```{r, message=FALSE, warning=FALSE}
+extra.metrics <- augment(Linear.model)
+```
+```{r,message=FALSE, warning=FALSE}
+# Add observations indices and
+# drop some columns (.se.fit, .sigma) for simplification
+extra.metrics <- extra.metrics %>%
+  mutate(index = 1:nrow(extra.metrics))
+```
+
+```{r, message=FALSE, warning=FALSE }
+extra.metrics %>%
+  top_n(6, wt = .cooksd)
+```
+It was noteworthy that the top five outliers with high Cook’s distance scores shared a common Overall.Quality score of 10. I decided that I would consider revisiting these observations at a later stage.  
+
+<br/>
+
+**PREDICTED/ACTUAL PRICES**
+
+<br/>
+
+I wanted to visualise the consistency of the predictions across the sample space.
+```{r,message=FALSE, warning=FALSE}
+
+library(auditor)
+lm_audit <- audit(Linear.model, data = trainSet, y =trainSet$SalePrice)
+# validate a model with auditor
+mr_lm <- model_residual(lm_audit)
+
+# plot results
+plot_prediction(mr_lm, abline = TRUE)
+```
+
+<br/>
+
+Here, it was evident that as price increases, the model's predictive accuracy diminishes.
+
+I was keen to explore the performance of a variety of algorithms that are known to work well with non-linear data. However, before I abandoned my exploration of linear regression, I wanted to find out what variables the linear model suggested were the most important in determining sale price.
+
+```{r}
+library(vip)
+vip(Linear.model)
+```
+
+<br/>
+
+### EXPERIMENTING WITH VARIOUS MODELS
+
+
+<br/>
+
+I decided to experiment with a variety of algorithms. I simply wanted to get a sense of what algorithm(s) may be well-suited to modelling Sale Price in relation to the variables I had at my disposal.
+
+<br/>
+
+```{r, multi grid, cache=TRUE, message=FALSE, warning=FALSE }
+library(parallel)      
+library(doParallel)
+
+Mycluster =makeCluster(detectCores()-1)
+registerDoParallel(Mycluster)
+
+myControl = trainControl(method = 'cv', number = 10, 
+verboseIter = FALSE, savePredictions = TRUE,allowParallel = T)
+
+
+
+set.seed(174)
+Linear.Model = train(SalePrice ~., data = trainSet, metric = 'RMSE', method = 'lm',preProcess = c('center', 'scale'),trControl = myControl)
+
+
+set.seed(174)
+Glmnet.Model = train(SalePrice ~ ., data = trainSet , metric = 'RMSE', method = 'glmnet',preProcess = c('center', 'scale'), trControl = myControl)
+
+
+set.seed(174)
+Rapid.Ranger = train(SalePrice ~ ., data = trainSet, metric = 'RMSE', method = 'ranger',preProcess = c('center', 'scale'),trControl = myControl)
+
+
+set.seed(174)
+Basic.Knn <- train(SalePrice ~ .,
+             method     = "knn",
+             tuneGrid   = expand.grid(k =1:3), trControl  = myControl, metric= "RMSE", data = trainSet)
+
+
+set.seed(174)
+Xgb.Super <- train(SalePrice~.,method = "xgbTree", tuneLength = 4,trControl = myControl,metric= "RMSE", data = trainSet)
+
+
+
+``` 
+
+<br/>
+
+```{r}
+suite.of.models = list("LINEAR.MODEL"=Linear.Model,"GLMNET.MODEL"=Glmnet.Model, "RANGER.QUEST"= Rapid.Ranger, "KNN.SIMPLE" = Basic.Knn, "XGB.SUPER"= Xgb.Super)
+resamps = resamples(suite.of.models) 
+dotplot(resamps, metric = 'RMSE')
+```
+
+<br/>
+
+
+#### TESTING MODELS ON TEST SET
+
+<br/>
+
+```{r}
+Evaluate.Prediction <- function(model, model.label, testData, ytest, grid = NULL) {
+ 
+  #capture prediction time
+  ptm <- proc.time()
+  # use test data to make predictions
+  pred <- predict(model, testData)
+  tm <- proc.time() - ptm
+  
+  Pred.metric<- postResample(pred = pred, obs = ytest)
+  RMSE.test <- c(Pred.metric[[1]])
+  RSquared.test <- c(Pred.metric[[2]])
+  MAE.test <- c(Pred.metric[[3]])
+  
+  
+  Summarised.results = NULL
+  if (is.null(grid)) { 
+    Summarised.results = data.frame(predictor = c(model.label) ,  RMSE = RMSE.test , RSquared = RSquared.test, MAE = MAE.test, time = c(tm[[3]]))
+  } else {
+    .grid = data.frame(predictor = c(model.label) , RMSE = RMSE.test , RSquared = RSquared.test, MAE = MAE.test, time = c(tm[[3]]))
+    Summarised.results = rbind(grid, .grid)}
+  
+  
+  Summarised.results }
+
+
+```
+
+
+<br/>
+
+```{r, cache=TRUE}
+METRIC.GRID <- Evaluate.Prediction (Rapid.Ranger, "RAPID.QUEST", testSet, testSet$SalePrice, grid=NULL)
+
+METRIC.GRID <- Evaluate.Prediction (Glmnet.Model, "GLMNET.MODEL", testSet, testSet$SalePrice, grid=METRIC.GRID)
+
+METRIC.GRID <- Evaluate.Prediction (Basic.Knn, "KNN.SIMPLE", testSet, testSet$SalePrice, grid=METRIC.GRID)
+
+METRIC.GRID <- Evaluate.Prediction (Linear.Model, "LINEAR.MODEL", testSet, testSet$SalePrice, grid=METRIC.GRID)
+
+METRIC.GRID <- Evaluate.Prediction (Xgb.Super, "XGB.SUPER", testSet, testSet$SalePrice, grid=METRIC.GRID)
+
+
+
+```
+<!--set.seed(174)
+SVM <- train(SalePrice ~ ., method = "svmRadial", metric="RMSE", data = trainSet, trControl = myControl)
+
+
+
+METRIC.GRID <- Evaluate.Prediction (SVM, "SVM", testSet, testSet$SalePrice, grid=METRIC.GRID)-->
+
+<br/>
+
+```{r}
+kable(METRIC.GRID[order(METRIC.GRID$RMSE, decreasing=F),])%>%kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+<br/>
+
+The random forest (Rapid.Ranger) model and extreme gradient boosting (XGB.SUPER) models showed the most promise with the lowest average predictive errors (RMSE). I decided to explore these models further.
+
+<br/>
+
+### TUNING A RANDOM FOREST MODEL USING TIDYMODELS FRAME WORK
+
+
+
+<br/>
+
+I decided to construct the random forest model using the R's `Tidymodels` framework. This is a superb package that beautifully streamlines the predictive modelling process. 
+
+To divide the available data, I recruited the initial_split() function: it is designed to split a data set into a training and testing set. In the default stance, 0.75 of the data is allocated to the training set with the remainder being reserved for testing. The default setting can be modified by changing the prop argument. Instead of a data frame, this function produces an `rsplit` object.
+
+
+
+```{r}
+set.seed(741)
+ames_split <- initial_split(ames.parsimonious6, prop = 0.80, strata = SalePrice)
+ames_train <- training(ames_split)
+ames_test  <- testing(ames_split)
+
+```
+
+<br/>
+
+I opted to perform cross validation on the train set. Cross-validation, also known as rotation estimation, is a validation strategy used for evaluating how well the results of a statistical analysis are likely to generalize to an unseen data set. Many data analysts employ k-fold cross-validation by employing k=5 or k=10, these numbers have demonstrated an ideal balance between minimizing bias and variance. 
+
+
+```{r}
+set.seed(174)
+random.f_cv <- vfold_cv(ames_train,v=2)
+```
+<br/>
+
+The following object *simple_rec* is a recipe/sequence of instructions that can been applied to datasets. The specified operations will be applied to the train and test sets that are used throughout this particular exploration of the random forest algorithm
+
+```{r}
+simple_rec <-
+recipe(SalePrice ~ .,
+  data= ames_train)%>%step_other(Neighborhood, threshold = 0.01)
+```
+step_meanimpute(all_numeric())%>%step_modeimpute(all_nominal())
+```{r}
+train.ready<-juice(simple_rec)
+test.ready<-bake(simple_rec, new_data = ames_test)
+```
+
+
+
+<!--
+_EXECUTING THE PREPROCESSING_
+
+
+Here, I trained the recipe on the *ames_train* data
+
+```{r, eval=FALSE}
+training_prep <- prep(simple_rec)
+#object trained on recipe
+```
+Here, I load the prepared training data into a variable using the juice() function. It will extract the data from the training_prep object.
+
+```{r, eval=FALSE}
+Juiced<-juice(training_prep)
+```
+
+Here, I recruit the *bake* function to transform the testing set with the operations of the specified recipe. 
+
+```{r, eval=FALSE}
+test.ready<- simple_rec%>%prep%>%
+bake(ames_test)
+```       -->
+
+<br/>
+
+In the code chunk specified below, the argument *engine* indicates what machine learning algorithm will be used to fit the model. Tidymodels is a wrapper for various machine learning packages. This is simply a specification, no data is being fed to the algorithm at this stage .
+
+
+```{r}                  
+ranger_model <- rand_forest(
+    trees = tune(),
+    mtry = tune()) %>%
+  set_engine("ranger", importance = "permutation") %>% 
+  set_mode("regression")
+```
+
+<br/>
+
+Here, I recruited a `workflow`: this is a container that integrates a preprocessing recipe and a model specification. 
+
+```{r}
+random.f_workflow <- workflow()%>% add_recipe(simple_rec)%>% 
+add_model(ranger_model)
+```
+
+<br/> 
+
+In the following code chunk, I specified a simple grid to be used in the quest for optimal parameters. I used the following grid numerous times with varying values. However, as I progressively experimented with varying values, I did not re-run the previously tried values in order to minimise computational cost. Thus, the following grid is a curtailed version of the values I have experimented with.
+
+```{r}
+random.f_grid <- expand_grid(mtry = 2:3, trees = seq(100, 300, by = 100))
+```
+<br/>
+
+It was time to initialise the exploration of the specified hyperparameter space.
+
+
+```{r, randomforest, cache=TRUE}
+tidy_grid_results <- random.f_workflow %>% tune_grid(
+    resamples = random.f_cv,
+    grid = random.f_grid)
+```
+
+### COLLECT METRICS OF RANGER MODEL
+
+<br/>
+
+Here, I visualised the movement of *RMSE* throughout the search
+
+```{r}
+autoplot(tidy_grid_results, metric = "rmse")
+```
+
+ Display of results in descending order
+
+```{r}
+show_best(tidy_grid_results, metric = "rmse") %>% knitr::kable()
+```  
+
+
+
+
+
+
+I extracted the parameters that generated the lowest `RMSE`
+
+```{r}
+param_final <- tidy_grid_results %>%select_best(metric = "rmse")
+```
+
+
+It was time to update the workflow: I added the optimised parameters to the workflow using the finalize_workflow() function.
+
+
+```{r}
+random.f_workflow <- random.f_workflow %>%
+finalize_workflow(param_final)
+```
+
+It was time to finally fit the model
+
+```{r}
+rf_fit <- random.f_workflow %>%
+fit(ames_train)
+```
+
+
+
+
+
+
+
+I decided to find out which features demonstrated the most importance according to the random forest model
+
+```{r}
+library(vip)
+rf_fit %>% 
+  pull_workflow_fit() %>% 
+  vip::vip()
+```
+
+<br/>
+
+### PERFORMANCE ON TEST SET:
+
+
+
+<br/>
+
+It was time to test the fitted model on the validation/test set. The `predict` function` in the tidymodels framework applies the same preprocessing operations that were defined in the recipe and previously applied to the training sets (cross-validation splits). However, this time these operations are applied to the test set before the newly preprocessed data is passed to the predict function.
+
+
+```{r}
+predict(rf_fit, new_data = ames_test)
+```
+<br/>
+
+Below, I plotted the predicted versus observed values produced by the random forest model 
+```{r}
+ranger_pred <- predict(rf_fit, new_data = ames_test %>% select(-SalePrice))
+```
+```{r}
+ranger_pred <- bind_cols(ranger_pred, ames_test %>% select(SalePrice))
+```
+
+<br/>
+
+```{r}
+ggplot(ranger_pred, aes(x = SalePrice, y = .pred)) + 
+  # Create a diagonal line:
+  geom_abline(lty = 2) + 
+  geom_point(alpha = 0.5) + 
+  labs(y = "Predicted Sale Price", x = "SalePrice") +
+  # Scale and size the x- and y-axis uniformly:
+  coord_obs_pred()
+```
+
+<br/>
+
+
+### TEST RESULTS:
+
+<br/>
+
+I was now in a position to trial the constructed model on the test set.
+```{r}
+ames_metrics <- metric_set(yardstick::rmse, yardstick:: mae)
+
+ames_metrics(ranger_pred, truth = SalePrice, estimate = .pred)
+```
+
+
+
+
+CONSTRUCTING AN EXPLAINER
+
+
+```{r}
+rf_fit2 <- random.f_workflow %>%
+fit(ames_train)
+```
+
+
+
+
+
+```{r, cache=TRUE}
+library(modelStudio)
+library(DALEXtra)
+library(DALEX)
+library(tidymodels)
+
+explainer <- explain_tidymodels(rf_fit,
+                                data = ames_test,
+                                y = ames_test$SalePrice,
+                                label = "tidymodels")
+
+
+{r, cache=TRUE}
+# pick observations
+new_observation <- ames_test[1:2,]
+rownames(new_observation) <- c("id1", "id2")
+
+# make a studio for the model
+modelStudio(explainer, new_observation)
+-->
+<br/>
+
+
+
+## XGBOOST MODELLING:
+
+<br/>
+
+It was time to construct a model using the `extreme gradient boosting algorithm`. 
+
+Again, I started by dividing the dataset into train/test sets
+
+```{r}
+# divide dataset, stratify by SalePrice
+set.seed(174)
+ames_split.2 <-initial_split(ames.parsimonious6, prop = 0.75, strata = SalePrice)
+ames_train2 <- training(ames_split.2)
+ames_test2  <- testing(ames_split.2)
+```
+
+<br/>
+
+
+Again, I called a recipe to perform some final preprocessing.
+```{r}
+XGB_rec <-
+recipe(SalePrice ~ .,
+  data= ames_train2)%>%
+  step_dummy(all_nominal())%>%step_knnimpute(all_predictors(), neighbors=10)%>%prep()
+```
+
+<br/>
+
+Here, I applied cross-validation to randomly divide the training data into more training and test subsets. 
+```{r, cache=TRUE}
+set.seed(174)
+cv_folds <-recipes::bake(
+    XGB_rec, 
+    new_data = ames_train2)%>%  
+  rsample::vfold_cv(v = 5)
+```
+
+<br/>
+
+In the following code block, I transformed the train/tests using the recipe (XGB_rec). I did not include this step when working with the previous random forest model. This step would not have been necessary if I had not gone on to construct an explainer with modelStudio (featured at the end of this document).
+
+
+```{r}
+train.ready<-juice(XGB_rec)
+test.ready<-bake(XGB_rec, new_data = ames_test2)
+```
+
+<br/>
+
+Here, I defined the XGBoost model specification, alongside the hyperparameters to be tuned
+
+```{r}
+Model.XGB <- 
+  boost_tree(
+    mode = "regression",
+    trees = 1000,
+    min_n = tune(),
+    tree_depth = tune(),
+    learn_rate = tune(),
+    loss_reduction = tune()
+  ) %>%set_engine("xgboost", objective = "reg:squarederror")
+```
+<br/>
+
+I employed the tidymodels dials package to specify the parameters.
+
+```{r, parameter specification}
+# grid specification 
+XGB.aspects <- 
+  dials::parameters(
+    min_n(),
+    tree_depth(),
+    learn_rate(),
+    loss_reduction())
+```
+
+<br/>
+
+At this stage, I set up the grid space of exploration by recruiting the *dials::grid_max_entropy() grid* function which covers the specified hyperparameter space.
+
+```{r, out.width="150%"}
+xgboost_grid <- 
+dials::grid_max_entropy(
+XGB.aspects, size = 200)
+knitr::kable(head(xgboost_grid))
+```
+
+<br/>
+
+At this stage, I recruited the tidymodels workflows package in order to apply a basic formula to the XGBoost model specified above.
+
+
+```{r, formula XGB}
+xgboost_wf <- 
+workflows::workflow() %>%
+add_model(Model.XGB) %>% 
+add_formula(SalePrice ~ .)
+```
+
+<br/>
+
+I used the following tune_grid() to specify the search space for optimal hyperparameters
+
+
+```{r, grid specification, cache=TRUE }
+# hyperparameter tuning
+TUNE.XGB <- tune::tune_grid(
+  object = xgboost_wf,
+  resamples = cv_folds,
+  grid = xgboost_grid,
+  metrics = yardstick::metric_set(yardstick::rmse, yardstick::rsq, yardstick::rsq_trad, yardstick::mae),
+  control = tune::control_grid(verbose = FALSE)) 
+```
+
+<br/>
+
+Here, I extracted the parameters that yielded the minimal "rmse"
+
+```{r}
+param_final <- TUNE.XGB %>%select_best(metric = "rmse")
+```
+
+<br/>
+
+I finalized the XGBoost model to use the tuning parameters that produced the lowest RMSE.
+
+```{r}
+xgboost_wf2 <- xgboost_wf%>%
+finalize_workflow(param_final)
+```
+
+<br/>
+
+It was time to fit the final extreme gradient boosting model
+```{r}
+XGB.model <- xgboost_wf2 %>%
+fit(train.ready)
+```
+
+<br/>
+
+Here, I extracted influential variables
+```{r}
+library(vip)
+XGB.model %>% 
+  pull_workflow_fit() %>% 
+  vip::vip()
+```
+
+<br/>
+
+**XGB PREDICT ON TEST SET:**
+
+
+
+I was now ready to make predictions on the unseen test set. Thereafter, I wanted to inspect the consistency of the predictions produced by the XGB.model:
+
+<br/>
+
+
+```{r}
+XGB_res <- predict(XGB.model, new_data = test.ready %>% select(-SalePrice))
+
+XGB_res <- bind_cols(XGB_res, test.ready %>% select(SalePrice))
+
+XGB_metrics <- metric_set(yardstick::rmse, yardstick:: mae)
+
+XGB_metrics(XGB_res, truth = SalePrice, estimate = .pred)
+
+ggplot(XGB_res, aes(x = SalePrice, y = .pred)) + 
+    # Create a diagonal line:
+    geom_abline(lty = 2) + 
+    geom_point(alpha = 0.5) + 
+    labs(y = "Predicted Sale Price", x = "SalePrice") +
+    # Scale and size the x- and y-axis uniformly:
+    coord_obs_pred()
+```
+
+
+
+<br/>
+
+
+
+
+
+
+### EXPLAINER:
+
+<br/>
+
+Finally, I constructed an explainer using the fitted extreme gradient boosting model. The explainer provides detailed descriptions of what direction particular features are likely to be impacting the prices of particular houses. In the following interactive display of boxes, explanations for the first two houses in the test set are offered . For a thorough explanation of the types of plots used below, I would recommend the curious reader to consult this excellent [resource](https://ema.drwhy.ai/iBreakDown.html).
+
+ 
+<br/>
+
+
+
+
+```{r}
+explainer<- explain_tidymodels(XGB.model,
+                                data = test.ready,
+                                y = test.ready$SalePrice,
+                                label = "tidymodels")
+```
+
+
+
+
+```{r}
+new_obs <- test.ready[1:2,]
+rownames(new_obs) <- c("case 1", "case 2")
+modelStudio(explainer, new_obs)
+```
+
+
+
+<!--
+move to shinyapp: 
+ames.shiny<-read.csv(file='ames.parsi6.csv')
+write.csv(ames.shiny,"ames.shiny2.csv",row.names=FALSE) -->
+
+### RAPID BUILD MODEL FOR SHINY TRAINING
+
+```{r}
+rm(list=ls())
+```
+
+
+```{r}
+library(tidymodels)
+library(tidyverse)
+library(caret)
+```
+
+
+
+```{r}
+ames.parsimonious6<-read.csv(file='ames.parsi6.csv')
+```
+```{r}
+ames.parsimonious6<-ames.parsimonious6[,c(1,2,21)]
+```
+```{r}
+rf1 <- train(SalePrice~., train.ready, method = "rf")
+```
+```{r}
+saveRDS(rf1, "myRFmodel.rds")
+```
+RF_MOD <- readRDS("myRFmodel.rds")
+
+```{r}
+predictions <- predict(rf1, newdata = test.ready)
+```
+
+<br/>
+
+I calculated the residuals using the formula residuals = actual - prediction.
+
+```{r}
+residuals <- test.ready$SalePrice - predictions
+```
+
+<br/>
+
+I was keen to find out how well the model performed. Here, I simply wanted to see the root-mean-square error(RMSE). 
+
+<br/>
+
+```{r}
+sqrt(mean(residuals^2))
+```
+
+
+
+
+
+
+
+
+```{r}
+# divide dataset, stratify by SalePrice
+set.seed(174)
+ames_split.2 <-initial_split(ames.parsimonious6, prop = 0.75, strata = SalePrice)
+ames_train2 <- training(ames_split.2)
+ames_test2  <- testing(ames_split.2)
+```
+
+<br/>
+
+
+Again, I called a recipe to perform some final preprocessing.
+```{r}
+XGB_rec <-
+recipe(SalePrice ~ .,
+  data= ames_train2)%>%step_dummy(all_nominal())%>%
+  step_knnimpute(all_predictors(), neighbors=10)%>%prep()
+```
+
+<br/>
+
+Here, I applied cross-validation to randomly divide the training data into more training and test subsets. 
+```{r, cache=TRUE}
+set.seed(174)
+cv_folds <-recipes::bake(
+    XGB_rec, 
+    new_data = ames_train2)%>%  
+  rsample::vfold_cv(v = 2)
+```
+
+<br/>
+
+In the following code block, I transformed the train/tests using the recipe (XGB_rec). I did not include this step when working with the previous random forest model. This step would not have been necessary if I had not gone on to construct an explainer with modelStudio (featured at the end of this document).
+
+
+```{r}
+train.ready<-juice(XGB_rec)
+test.ready<-bake(XGB_rec, new_data = ames_test2)
+```
+
+<br/>
+
+Here, I defined the XGBoost model specification, alongside the hyperparameters to be tuned
+
+```{r}
+Model.XGB <- 
+  boost_tree(
+    mode = "regression",
+    trees = 100,
+    min_n = tune(),
+    tree_depth = tune(),
+    learn_rate = tune(),
+    loss_reduction = tune()
+  ) %>%set_engine("xgboost", objective = "reg:squarederror")
+```
+<br/>
+
+I employed the tidymodels dials package to specify the parameters.
+
+```{r, parameter specification}
+# grid specification 
+XGB.aspects <- 
+  dials::parameters(
+    min_n(),
+    tree_depth(),
+    learn_rate(),
+    loss_reduction())
+```
+
+<br/>
+
+At this stage, I set up the grid space of exploration by recruiting the *dials::grid_max_entropy() grid* function which covers the specified hyperparameter space.
+
+```{r, out.width="150%"}
+xgboost_grid <- 
+dials::grid_max_entropy(
+XGB.aspects, size = 50)
+knitr::kable(head(xgboost_grid))
+```
+
+<br/>
+
+At this stage, I recruited the tidymodels workflows package in order to apply a basic formula to the XGBoost model specified above.
+
+
+```{r, formula XGB}
+xgboost_wf <- 
+workflows::workflow() %>%
+add_model(Model.XGB) %>% 
+add_formula(SalePrice ~ .)
+```
+
+<br/>
+
+I used the following tune_grid() to specify the search space for optimal hyperparameters
+
+
+```{r, grid specification, cache=TRUE }
+# hyperparameter tuning
+TUNE.XGB <- tune::tune_grid(
+  object = xgboost_wf,
+  resamples = cv_folds,
+  grid = xgboost_grid,
+  metrics = yardstick::metric_set(yardstick::rmse, yardstick::rsq, yardstick::rsq_trad, yardstick::mae),
+  control = tune::control_grid(verbose = FALSE)) 
+```
+
+<br/>
+
+Here, I extracted the parameters that yielded the minimal "rmse"
+
+```{r}
+param_final <- TUNE.XGB %>%select_best(metric = "rmse")
+```
+
+<br/>
+
+I finalized the XGBoost model to use the tuning parameters that produced the lowest RMSE.
+
+```{r}
+xgboost_wf2 <- xgboost_wf%>%
+finalize_workflow(param_final)
+```
+
+<br/>
+
+It was time to fit the final extreme gradient boosting model
+```{r}
+XGB_SHINY <- xgboost_wf2 %>%
+fit(train.ready)
+```
+```{r}
+saveRDS(XGB_SHINY, "XGB_Shiny.rds")
+```
+
+### CARET QUICK-FIT:
+
+```{r}
+trctrl <- trainControl(method = "cv", number = 5)
+
+# Takes a long to time to run in kaggle
+#tune_grid <- expand.grid(nrounds=c(100,200,300,400), 
+#                         max_depth = c(3:7),
+#                         eta = c(0.05, 1),
+#                         gamma = c(0.01),
+#                         colsample_bytree = c(0.75),
+#                         subsample = c(0.50),
+#                         min_child_weight = c(0))
+
+# Tested the above setting in local machine
+tune_grid <- expand.grid(nrounds = 200,
+                         max_depth = 5,
+                         eta = 0.05,
+                         gamma = 0.01,
+                         colsample_bytree = 0.75,
+                         min_child_weight = 0,
+                         subsample = 0.5)
+
+rf_fit <- train(SalePrice ~., data = train, method = "xgbTree",
+                trControl=trctrl,
+                tuneGrid = tune_grid,
+                tuneLength = 10)
+
+# have a look at the model 
+rf_fit
+
+# Testing
+test_predict <- predict(rf_fit, test)
+
+
+NEW RAPID BUILD::
+  
+  set.seed(1)
+rf.model = randomForest(SalePrice ~ ., data = ames_train, mtry = 2, ntree = 500, importance = TRUE)
+predictions = predict(rf.model, newdata = ames_test)
+mean((predictions - ames_test$SalePrice)^2)
+
+
+RETRY:
+  
+tg <- data.frame(mtry = seq(2, 4, by =1))
+rf1 <- train(SalePrice~., data = ames_train, method = "rf", tuneGrid = tg)
+rf1$results
+
+
+test_predict <- predict(rf1, ames_test)
+sqrt(mean((test_predict - ames_test$SalePrice)^2))
+saveRDS(rf1, "rf1_Shiny.rds")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
